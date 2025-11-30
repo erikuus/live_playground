@@ -1,0 +1,133 @@
+<p>
+  The <code>SearchParam</code> module enhances the search interface by
+  integrating URL parameters to manage and reflect the search state. This
+  approach allows the search state to be bookmarkable and shareable.
+</p>
+<h3><code>mount/3</code></h3>
+<ul>
+  <li>
+    Sets up initial state with empty search values using the
+    <code>assign_empty_search/1</code> helper function.
+  </li>
+</ul>
+<h3><code>assign_empty_search/1</code></h3>
+<ul>
+  <li>
+    Centralizes the logic for resetting search state, ensuring consistent
+    initialization across <code>mount/3</code> and <code>handle_params/3</code>.
+  </li>
+  <li>
+    <code>:query</code> stores the current search term to populate the input
+    field and maintain state consistency between URL parameters and the form.
+  </li>
+  <li>
+    <code>:countries</code> holds the search results array to display in the
+    table, or remains empty to hide the results table when no search has been
+    performed.
+  </li>
+  <li>
+    <code>:loading</code> tracks whether a search is currently in progress to
+    show/hide the loading indicator and disable form controls during search.
+  </li>
+</ul>
+<h3><code>handle_params/3</code></h3>
+<p>
+  Responds to URL parameter changes, processing search queries from the URL.
+  This enables bookmarkable and shareable search URLs.
+</p>
+<ul>
+  <li>
+    <strong>Empty query pattern</strong> (<code>%{"q" => ""}</code>): Triggered
+    when users submit an empty search or manually navigate to
+    <code>/search-param?q=</code>. Provides immediate feedback instead of
+    performing an unnecessary search operation.
+  </li>
+  <li>
+    <strong>Valid query pattern</strong> (<code>%{"q" => query}</code>):
+    Triggered when users search or navigate to URLs like
+    <code>/search-param?q=france</code>. Uses query comparison (<code
+      >if query != socket.assigns.query</code
+    >) to prevent duplicate searches when the same URL is visited multiple
+    times.
+  </li>
+  <li>
+    <strong>No parameters pattern</strong> (<code>_params</code>): Triggered
+    when users visit <code>/search-param</code> directly or click the Clear
+    button. Resets to a clean search interface.
+  </li>
+</ul>
+<h3><code>render/1</code></h3>
+<ul>
+  <li>
+    Constructs the search form with an input field and two buttons: one for
+    search submission and one to clear results.
+  </li>
+  <li>
+    Input field and submit button are disabled during loading
+    (<code>disabled={@loading}</code>) to prevent multiple concurrent searches
+    and provide clear visual feedback.
+  </li>
+  <li>
+    Displays search results in a table when available, or shows flash messages
+    for empty results or validation errors.
+  </li>
+</ul>
+<h3><code>handle_event/3</code> for <code>"search"</code></h3>
+<ul>
+  <li>
+    Uses <code>push_patch/2</code> to update the URL with the search query,
+    which then triggers <code>handle_params/3</code> to process the actual
+    search.
+  </li>
+  <li>
+    This URL-first approach ensures search state is reflected in the browser
+    address bar, making searches bookmarkable and shareable.
+  </li>
+</ul>
+<h3><code>handle_info/2</code> for <code>{:find, query}</code></h3>
+<ul>
+  <li>
+    Processes search requests asynchronously, preventing the LiveView process
+    from blocking during database queries. This keeps the UI responsive and
+    allows the loading state to display immediately.
+  </li>
+  <li>
+    Includes a simulated delay to demonstrate the loading state behavior. In
+    production, this delay should be removed.
+  </li>
+  <li>
+    Handles search results and always clears the loading state:
+    <ul>
+      <li>
+        <strong>No results found</strong>: Sets a flash message and re-enables
+        form controls.
+      </li>
+      <li>
+        <strong>Results found</strong>: Updates the countries list and
+        re-enables form controls.
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3>Key Implementation Patterns</h3>
+<ul>
+  <li>
+    <strong>URL-First Architecture</strong>: Unlike the basic search that
+    manages state internally, this approach routes all searches through URL
+    changes. Form submission updates the URL, which triggers
+    <code>handle_params/3</code> to process the search. This creates
+    bookmarkable search results and enables browser back/forward navigation.
+  </li>
+  <li>
+    <strong>Query Comparison for Efficiency</strong>: The
+    <code>if query != socket.assigns.query</code>
+    check prevents unnecessary API calls when users navigate to the same search
+    URL multiple times (like refreshing the page or using browser navigation).
+  </li>
+  <li>
+    <strong>Disabled UI Pattern</strong>: Form controls are disabled during
+    loading to provide clear visual feedback and prevent multiple concurrent
+    searches. This approach prioritizes user clarity over immediate
+    responsiveness.
+  </li>
+</ul>

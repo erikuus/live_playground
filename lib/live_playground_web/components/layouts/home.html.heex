@@ -1,0 +1,9 @@
+<.multi_column_layout>
+  <:narrow_sidebar>
+    <Sidebar.menu current_layout={:home} current_user={@current_scope && @current_scope.user} />
+  </:narrow_sidebar>
+</.multi_column_layout>
+<.auth_menu :if={!@current_scope || !@current_scope.user} id="auth-menu-header" current_user={nil} />
+<div class="ml-14 md:ml-20 mt-10 md:mt-20">
+  {@inner_content}
+</div>

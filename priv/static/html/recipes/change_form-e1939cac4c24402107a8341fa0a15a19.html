@@ -1,0 +1,131 @@
+<p>
+  The <code>ChangeForm</code> module demonstrates dynamic form handling in
+  Phoenix LiveView, where form sections appear and disappear based on user
+  selections. It showcases conditional rendering and real-time form updates
+  without page refreshes.
+</p>
+
+<h3><code>mount/3</code></h3>
+<p>
+  Initializes the LiveView with default form state, setting the event type to
+  "conference" and ticket type to "regular". This establishes the initial form
+  configuration that determines which conditional fields are displayed on first
+  render.
+</p>
+
+<h3><code>render/1</code></h3>
+<p>
+  Constructs the main form using HEEx templating with a
+  <code>phx-change="update_form"</code>
+  event that triggers whenever any form input changes. The form structure
+  includes:
+</p>
+<ul>
+  <li>
+    <strong>Event Type Select:</strong> A dropdown that calls
+    <code>get_event_type_options()</code> for its options and binds to
+    <code>@event_type</code> from socket assigns
+    <ul>
+      <li>
+        <code>&lt;.event_specific_fields&gt;</code> component receives the
+        current <code>event_type</code> and conditionally renders fields
+        specific to conferences or workshops
+      </li>
+    </ul>
+  </li>
+  <li>
+    <strong>Ticket Type Radio Group:</strong> Three radio buttons (Regular, VIP,
+    Student) with <code>checked</code> attributes bound to
+    <code>@ticket_type</code> state
+    <ul>
+      <li>
+        <code>&lt;.vip_preferences&gt;</code> component appears only when VIP is
+        selected
+      </li>
+      <li>
+        <code>&lt;.student_verification&gt;</code> component appears only when
+        Student is selected
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>event_specific_fields/1</code></h3>
+<p>
+  A functional component that uses pattern matching to render different form
+  sections based on the selected event type:
+</p>
+<ul>
+  <li>
+    <strong>Conference:</strong> Shows dietary restrictions text field and
+    session track dropdown
+  </li>
+  <li>
+    <strong>Workshop:</strong> Displays skill level selector and learning goals
+    textarea
+  </li>
+  <li><strong>Default:</strong> Renders empty content for other event types</li>
+</ul>
+
+<h3><code>vip_preferences/1</code></h3>
+<p>
+  Conditionally renders VIP-specific options when "VIP" ticket type is selected.
+  Includes checkboxes for VIP lounge access, priority seating, and premium
+  welcome package. Uses <code>phx-update="ignore"</code> to maintain checkbox
+  state during re-renders.
+</p>
+
+<h3><code>student_verification/1</code></h3>
+<p>
+  Displays student verification fields (university name and student ID) when
+  "Student" ticket type is selected.
+</p>
+
+<h3><code>handle_event/3</code></h3>
+<p>
+  Handles the <code>phx-change="update_form"</code> event triggered when any
+  form input changes. Extracts both <code>event_type</code> and
+  <code>ticket_type</code>
+  from the form data and updates the socket assigns, causing the form to
+  re-render with appropriate conditional sections.
+</p>
+
+<h3><code>phx-update="ignore"</code></h3>
+<p>
+  The <code>phx-update="ignore"</code> attribute is crucial for maintaining user
+  input state in dynamic form sections. Without this attribute, LiveView would
+  completely replace the DOM elements during re-renders, causing:
+</p>
+<ul>
+  <li>
+    <strong>Lost user input:</strong> Any text typed into fields would disappear
+  </li>
+  <li>
+    <strong>Reset checkboxes:</strong> Checkbox selections would be cleared
+  </li>
+</ul>
+<p>
+  By adding <code>phx-update="ignore"</code> to conditional sections like VIP
+  preferences and student verification, we tell LiveView to preserve the
+  existing DOM elements and their current state, only showing or hiding the
+  entire section based on the conditional logic. This ensures a smooth user
+  experience where form inputs retain their values even as other parts of the
+  form change dynamically.
+</p>
+
+<h3>Helper Functions</h3>
+<p>Three helper functions provide options for select dropdowns:</p>
+<ul>
+  <li>
+    <code>get_event_type_options/0</code> - Returns conference, workshop, and
+    webinar options
+  </li>
+  <li>
+    <code>get_session_track_options/0</code> - Provides technology, business,
+    and design tracks
+  </li>
+  <li>
+    <code>get_skill_level_options/0</code> - Offers beginner, intermediate, and
+    advanced levels
+  </li>
+</ul>

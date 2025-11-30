@@ -1,0 +1,99 @@
+<p>
+  Below are the test cases focusing on edge scenarios and manual URL
+  manipulations. These tests cover conditions that may not occur during typical
+  usage but are critical for ensuring robustness.
+</p>
+<p><strong>1. Navigating to a Nonexistent Last Page After Deletion</strong></p>
+<ul>
+  <li>
+    <strong>Scenario</strong>: Delete all items on the penultimate page and
+    attempt to navigate to the now-nonexistent last page.
+  </li>
+  <li>
+    <strong>Steps</strong>:
+    <ol>
+      <li>Navigate to the penultimate page (e.g., page 5 of 6).</li>
+      <li>Delete all items on that page.</li>
+      <li>Attempt to navigate to page 6.</li>
+    </ol>
+  </li>
+  <li>
+    <strong>Expected Outcome</strong>:
+    <ul>
+      <li>The user is redirected to the last valid page (5).</li>
+      <li>Pagination recalculates and shows 5 pages.</li>
+    </ul>
+  </li>
+</ul>
+<p><strong>2. Deleting the Only Item on the Last Page</strong></p>
+<ul>
+  <li><strong>Scenario</strong>: Delete the only item on the last page.</li>
+  <li>
+    <strong>Steps</strong>:
+    <ol>
+      <li>Navigate to the last page with only one item.</li>
+      <li>Delete the item.</li>
+      <li>Reload page from the link displayed in the flash message.</li>
+    </ol>
+  </li>
+  <li>
+    <strong>Expected Outcome</strong>:
+    <ul>
+      <li>User is directed to page 5, which is now the last page.</li>
+      <li>Pagination and summary are recalculated accordingly.</li>
+    </ul>
+  </li>
+</ul>
+<p><strong>3. Manually Manipulating the URL for a Nonexistent Page</strong></p>
+<ul>
+  <li>
+    <strong>Scenario</strong>: A user manipulates the URL to navigate to a
+    nonexistent page.
+  </li>
+  <li>
+    <strong>Steps</strong>:
+    <ol>
+      <li>
+        Manually change the page number in the URL to an invalid page (e.g.,
+        page 100 when there are only 10 pages).
+      </li>
+      <li>Load the page.</li>
+    </ol>
+  </li>
+  <li>
+    <strong>Expected Outcome</strong>:
+    <ul>
+      <li>The user is redirected to the last valid page (e.g., page 10).</li>
+      <li>
+        Pagination and summary reflect the correct number of items and pages.
+      </li>
+      <li>The URL is updated to match the corrected state.</li>
+    </ul>
+  </li>
+</ul>
+<p><strong>4. Manually Changing Per-Page Value in the URL</strong></p>
+<ul>
+  <li>
+    <strong>Scenario</strong>: A user manipulates the URL to set an invalid or
+    extreme per-page value.
+  </li>
+  <li>
+    <strong>Steps</strong>:
+    <ol>
+      <li>
+        Manually change the <code>per_page</code> parameter in the URL to an
+        invalid or extreme value (e.g., <code>per_page=1000</code> or
+        <code>per_page=-1</code>).
+      </li>
+      <li>Load the page.</li>
+    </ol>
+  </li>
+  <li>
+    <strong>Expected Outcome</strong>:
+    <ul>
+      <li>The <code>per_page</code> value is set to the default value (10).</li>
+      <li>Pagination and summary are recalculated accordingly.</li>
+      <li>The URL reflects the updated <code>per_page</code> value.</li>
+    </ul>
+  </li>
+</ul>

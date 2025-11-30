@@ -1,0 +1,230 @@
+<p>
+  The <code>Upload</code> module shows how to build a complete file upload
+  interface with drag-and-drop functionality, file selection, real-time
+  previews, and progress tracking. The upload handling uses LiveView's built-in
+  upload system, though the actual file storage is not implemented in this
+  example. (See <a href="/upload-server">next recipe</a>.)
+</p>
+<h3><code>mount/3</code></h3>
+<p>
+  This function initializes the LiveView and sets up the socket for handling
+  file uploads:
+</p>
+<ul>
+  <li>
+    <strong>Form Initialization</strong>: The socket is assigned a simple form
+    using <code>to_form(%{})</code>. For uploads, you only need a form wrapper
+    plus <code>allow_upload/3</code> and a file input. The form does not have to
+    be changeset‑backed and it doesn't need any other fields to enable uploads.
+  </li>
+  <li>
+    <strong>Enabling File Uploads</strong>:
+    <ul>
+      <li>
+        <strong>Upload Configuration</strong>: <code>allow_upload/3</code> sets
+        up a file upload handler. The first argument <code>:photos</code> is the
+        name you choose (could be <code>:images</code>, <code>:documents</code>,
+        etc.). LiveView automatically creates <code>@uploads.photos</code> in
+        your assigns based on this name. This assign contains
+        <code>.entries</code> (selected files), <code>.ref</code> (for drop
+        targets), and <code>.errors</code> (validation failures) that you'll use
+        in your template.
+      </li>
+      <li>
+        <strong>File Type Restrictions</strong>: The second argument
+        <code>accept: ~w(.png .jpg)</code> defines which file types are allowed.
+        LiveView validates this on the client side first for immediate feedback,
+        then again on the server for security.
+      </li>
+      <li>
+        <strong>Quantity Limits</strong>: The third argument
+        <code>max_entries: 4</code>
+        sets the maximum number of files users can select. If they try to add a
+        5th file, it will be rejected and show an error message.
+      </li>
+      <li>
+        <strong>Size Limits</strong>: The fourth argument
+        <code>max_file_size: 10_000_000</code>
+        (10 MB in bytes) rejects files that exceed this size. This prevents both
+        accidental large uploads and potential server abuse.
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3><code>render/1</code></h3>
+<p>
+  The render function creates a complete file upload interface with three main
+  components: a form wrapper, a drag-and-drop zone, and a preview grid. Here's
+  the overall structure:
+</p>
+
+<pre><code>&lt;.form&gt;
+  &lt;div phx-drop-target={@uploads.photos.ref}&gt;
+    &lt;label for={@uploads.photos.ref}&gt;
+      &lt;.live_file_input upload={@uploads.photos} /&gt;
+    &lt;/label&gt;
+  &lt;/div&gt;
+  &lt;.error :for={err <- upload_errors(@uploads.photos)}&gt;
+  &lt;ul&gt;
+    &lt;li :for={entry <- @uploads.photos.entries}&gt;
+      &lt;.live_img_preview entry={entry} /&gt;
+      &lt;div&gt;
+        &lt;svg&gt;&lt;circle /&gt;&lt;/svg&gt;
+        &lt;.error :for={err <- upload_errors(@uploads.photos, entry)}&gt;
+        &lt;.link phx-click="cancel" phx-value-ref={entry.ref}&gt;
+      &lt;/div&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/.form&gt;</code></pre>
+
+<ul>
+  <li>
+    <p><strong>Form Setup</strong>:</p>
+    <ul>
+      <li>
+        The upload UI is wrapped in a <code>&lt;.form&gt;</code> bound to the
+        <code>@form</code> assign. You can use <code>phx-change</code> to
+        re-render as files are selected, but no additional form fields are
+        required for uploads to work. The form does not need to be backed by a
+        changeset.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>File Upload Drop Zone</strong>:</p>
+    <ul>
+      <li>
+        <strong>Drop Target Setup</strong>: The
+        <code>phx-drop-target</code> attribute connects to
+        <code>@uploads.photos.ref</code>, making this div accept dropped files
+        for the specific upload configuration.
+      </li>
+      <li>
+        <strong>Upload Instructions</strong>: A styled label wraps the "Upload a
+        file" text and connects to a hidden file input via the
+        <code>for</code> attribute. Clicking the label opens the file picker
+        dialog.
+      </li>
+      <li>
+        <strong>Hidden File Input</strong>: The
+        <code>&lt;.live_file_input&gt;</code> component with
+        <code>class="sr-only"</code> creates the actual file input that's
+        triggered when users click the label or drop files.
+      </li>
+      <li>
+        <strong>Upload Constraints Display</strong>: Shows the maximum number of
+        files, accepted file types (formatted by
+        <code>format_accept_filetypes_list/1</code>), and maximum file size
+        (formatted by <code>format_max_file_size_mb/1</code>).
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Global Upload Errors</strong>:</p>
+    <ul>
+      <li>
+        Displays upload-level errors (like "too many files") using
+        <code>upload_errors(@uploads.photos)</code> before showing individual
+        file previews. These errors affect the entire upload operation, not
+        specific files.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>File Preview Grid</strong>:</p>
+    <ul>
+      <li>
+        <strong>Preview Container</strong>: A responsive grid that loops through
+        <code>@uploads.photos.entries</code> to display each selected file.
+      </li>
+      <li>
+        <strong>Image Preview for Valid Files</strong>: Uses
+        <code>&lt;.live_img_preview&gt;</code> when
+        <code>:not_accepted</code> is not in the entry's errors. This shows a
+        thumbnail for accepted image files.
+      </li>
+      <li>
+        <strong>Fallback Display for Invalid Files</strong>: Shows the filename
+        (<code>entry.client_name</code>) when files are rejected due to type
+        restrictions. This provides feedback even when preview isn't possible.
+      </li>
+      <li>
+        <strong>Upload Progress and Controls</strong>: Contains three elements:
+        <ul>
+          <li>
+            <strong>Progress Ring Indicator</strong>: An SVG circle that
+            visualizes upload progress using <code>stroke-dasharray</code> and
+            <code>stroke-dashoffset</code>. Only shows for files without errors.
+          </li>
+          <li>
+            <strong>Per-File Upload Errors</strong>: Displays specific errors
+            for each file (like "too large" or "not accepted") using
+            <code>upload_errors(@uploads.photos, entry)</code>.
+          </li>
+          <li>
+            <strong>Cancel Button</strong>: A trash icon that triggers the
+            "cancel" event with the file's reference, allowing users to remove
+            files from the upload queue.
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3><code>handle_event/3</code></h3>
+<p>Manages user interactions with the file upload UI:</p>
+<ul>
+  <li>
+    <p><strong>"cancel"</strong>:</p>
+    <ul>
+      <li>Triggered when the user clicks the trash icon on a file preview.</li>
+      <li>
+        Uses <code>cancel_upload/3</code> to remove the file from LiveView's
+        upload entries based on its reference (<code>ref</code>). This
+        immediately removes the file's preview from the UI and clears it from
+        memory.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"validate"</strong>:</p>
+    <ul>
+      <li>
+        Triggered when files are selected/dropped for upload (and any optional
+        fields you might add).
+      </li>
+      <li>
+        Reassigns the form using <code>to_form(params)</code> for a lightweight,
+        non‑changeset approach.
+      </li>
+      <li>
+        LiveView manages the upload entries (in <code>@uploads.photos</code>)
+        regardless of changeset usage. The change event here simply updates the
+        assigns and re-renders so the UI reflects new selections and any upload
+        errors.
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3>Helper Functions</h3>
+<p>These functions support the formatting and display of the file upload UI:</p>
+<ul>
+  <li>
+    <strong><code>format_accept_filetypes_list/1</code></strong
+    >: Converts the accepted file types from the upload configuration into a
+    readable string (e.g., <code>~w(.png .jpg)</code> becomes
+    <code>"PNG, JPG"</code>).
+  </li>
+  <li>
+    <strong><code>format_max_file_size_mb/1</code></strong
+    >: Converts the maximum file size from bytes to megabytes.
+  </li>
+  <li>
+    <strong><code>get_circle_length/1</code></strong
+    >: Calculates the circumference of a circle (2 × π × radius) for creating
+    SVG progress rings. The result is used as the
+    <code>stroke-dasharray</code> value, which makes the entire circle one long
+    dash that can be animated by adjusting <code>stroke-dashoffset</code> to
+    show upload progress.
+  </li>
+</ul>

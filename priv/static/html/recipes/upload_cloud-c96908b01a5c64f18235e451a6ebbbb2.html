@@ -1,0 +1,420 @@
+<p>
+  The <code>UploadCloud</code> module demonstrates a complete file upload
+  workflow in Phoenix LiveView, where images are uploaded directly to an AWS S3
+  bucket instead of being saved locally.
+</p>
+
+<h3><code>mount/3</code></h3>
+<p>
+  This function initializes the LiveView and sets up the socket for handling
+  file uploads to AWS S3 and for managing location data. This recipe
+  demonstrates three key LiveView patterns working together: cloud file uploads,
+  real-time broadcasting, and selective UI updates using streams.
+</p>
+<ul>
+  <li>
+    <strong>Real-time Subscription</strong>: The LiveView process subscribes to
+    location updates using <code>Locations.subscribe()</code> when connected,
+    and unsubscribes in <code>terminate/2</code> for cleanup. When any user
+    uploads images to a location, all other connected users will immediately see
+    those images appear without refreshing their browsers. (For more details
+    about broadcasting patterns, see the
+    <a href="/broadcast">broadcast recipes</a>.)
+  </li>
+  <li>
+    <strong>Location Options Setup</strong>: Fetches all Estonian locations and
+    creates dropdown options by mapping each location to a
+    <code>{name, id}</code> tuple for the select input.
+  </li>
+  <li>
+    <strong>Form Initialization</strong>: Creates a form using
+    <code>Locations.change_location/1</code> with a new
+    <code>Location</code> struct. While this form is primarily for location
+    selection, uploads require <em>a form</em> plus
+    <code>allow_upload/3</code> and a file input; the form does not have to be
+    changeset‑backed.
+  </li>
+  <li>
+    <strong>Efficient UI Updates with Streams</strong>:
+    <code>stream/3</code> sets up the locations list for optimal real-time
+    updates. When images are uploaded to a specific location, only that
+    location's card in the grid gets updated rather than re-rendering the entire
+    page. (For more details about stream patterns, see the
+    <a href="/stream-insert">stream recipes</a>.)
+  </li>
+  <li>
+    <strong>Enabling File Uploads</strong>:
+    <ul>
+      <li>
+        <strong>External Upload Configuration</strong>:
+        <code>allow_upload/3</code> with
+        <code>external: &presign_upload/2</code> tells LiveView to upload
+        directly to S3. The browser posts the file to S3 using the returned
+        instructions. Ensure your bucket’s CORS policy allows these POSTs (see
+        the note below).
+      </li>
+      <li>
+        <strong>File Type Restrictions</strong>:
+        <code>accept: ~w(.png .jpg .jpeg)</code>
+        defines which file types are allowed. LiveView validates file types in
+        the browser before upload begins.
+      </li>
+      <li>
+        <strong>Quantity Limits</strong>: <code>max_entries: 8</code> sets the
+        maximum number of files users can select. Additional files will be
+        rejected with error messages.
+      </li>
+      <li>
+        <strong>Size Limits</strong>: <code>max_file_size: 10_000_000</code> (10
+        MB) stops oversized files before the upload starts in the browser,
+        avoiding unnecessary attempts and bandwidth usage when uploading
+        directly to S3.
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>assign_form/2</code></h3>
+<p>
+  Updates the form in the socket with the given changeset, allowing the form to
+  reflect the latest validation state and errors.
+</p>
+
+<h3><code>presign_upload/2</code></h3>
+<p>
+  This helper function is called by LiveView for each selected file to generate
+  presigned S3 URLs that allow direct browser uploads:
+</p>
+<ul>
+  <li>
+    <strong>AWS Configuration</strong>: Sets up S3 credentials and region from
+    environment variables for security.
+  </li>
+  <li>
+    <strong>Presigned URL Generation</strong>: Uses
+    <code>SimpleS3Upload.sign_form_upload/3</code>
+    to create a time-limited URL (1 hour) that allows the browser to upload
+    directly to the specified S3 bucket with the unique filename.
+  </li>
+  <li>
+    <strong>Upload Instructions</strong>: Returns the S3 URL, required form
+    fields, and uploader configuration that LiveView’s JavaScript uses to
+    perform the upload. Concretely:
+    <ul>
+      <li><code>url</code>: The S3 endpoint that accepts the POST</li>
+      <li>
+        <code>fields</code>: Form fields S3 requires for a valid, time-limited
+        upload (policy, signature, etc.)
+      </li>
+      <li><code>key</code>: The object key (final path/name in the bucket)</li>
+      <li>
+        Client code: implemented in <code>assets/js/uploaders/S3.js</code>,
+        which LiveView calls automatically
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>filename/1</code></h3>
+<p>
+  Creates a unique filename by prefixing LiveView’s generated UUID to the file’s
+  base name (e.g., <code>"abc123-photo.jpg"</code>). Using
+  <code>Path.basename/1</code>
+  makes this function generically safe by extracting only the filename, even if
+  it were ever called with a full path in other contexts (for example,
+  <code>"C:\Users\Alice\photo.jpg"</code> would become
+  <code>"photo.jpg"</code>). The UUID prevents collisions when different users
+  upload files with the same name.
+</p>
+
+<h3><code>render/1</code></h3>
+<p>
+  The <code>render/1</code> function generates the HTML structure for the page,
+  including the file upload interface and the display of uploaded images from
+  AWS S3:
+</p>
+<ul>
+  <li>
+    <p><strong>Location Selection</strong>:</p>
+    <ul>
+      <li>
+        A dropdown menu allows users to select a location (city) from a list of
+        Estonian cities.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>File Upload and Preview Components</strong>:</p>
+    <ul>
+      <li>
+        <strong><code>&lt;.uploads_upload_area /&gt;</code></strong
+        >: Handles the drag-and-drop area and file selection interface.
+      </li>
+      <li>
+        <strong><code>&lt;.uploads_photo_preview_area /&gt;</code></strong
+        >: Manages the display of file previews, showing thumbnails for accepted
+        files and errors for rejected ones. Includes a progress circle for
+        upload status and a remove icon for removing the file from being
+        uploaded.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <strong>General Error Display</strong>:
+    <ul>
+      <li>
+        General errors from <code>@uploads.photos</code> (e.g., too many files)
+        are rendered before previews. Per-entry errors (e.g., type or size) are
+        shown in the preview component next to each file.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <strong>Submit Availability</strong>:
+    <ul>
+      <li>
+        The “Upload” button is shown only when there are selected files
+        (<code>@uploads.photos.entries</code>), preventing empty submissions.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Locations Display</strong>:</p>
+    <ul>
+      <li>
+        A responsive grid of cards displays the locations along with any
+        associated images:
+        <ul>
+          <li>
+            <strong>Location Name</strong>: Shows the name of the location.
+          </li>
+          <li>
+            <strong>Thumbnails</strong>: Displays thumbnails of the uploaded
+            images from AWS S3.
+          </li>
+          <li>
+            <strong>Remove Images</strong>: Provides a trash icon to remove
+            image URLs from the location's <code>photos_s3</code> field in the
+            database, but note that the images remain on S3 unless manually
+            deleted.
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>handle_event/3</code></h3>
+<p>
+  This function manages user interactions for uploading files to S3, form
+  submission, and image management:
+</p>
+<ul>
+  <li>
+    <p><strong>"cancel"</strong>:</p>
+    <ul>
+      <li>
+        Triggered when a user clicks the trash icon next to an uploading file.
+        This event removes the file from the upload queue using
+        <code>cancel_upload/3</code>.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"validate"</strong>:</p>
+    <ul>
+      <li>
+        On <code>phx-change</code>, the changeset’s <code>:action</code> is set
+        to <code>:validate</code> so form errors render immediately, including
+        upload errors.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"save" Event</strong>:</p>
+    <ul>
+      <li>
+        Triggered when the user submits the form to upload images to S3 for the
+        selected location:
+        <ol>
+          <li>
+            <strong>Get Location</strong>: Retrieves the selected location from
+            the database using the form's location ID.
+            <code>Locations.get_location!/1</code> is used intentionally. If the
+            ID is invalid (e.g., empty or 0), LiveView raises and Phoenix
+            renders a 404. No extra error handling is added in the LiveView.
+          </li>
+          <li>
+            <strong>Process Completed Uploads</strong>: After the browser
+            uploads files to S3, <code>consume_uploaded_entries/3</code> runs
+            once per completed entry. In an external (S3) setup, we don’t
+            receive file contents; instead, we return
+            <code>{:ok, url}</code> for each entry, where <code>url</code> is
+            built from the bucket URL plus the unique filename. The
+            <code>meta</code> argument is ignored here because the upload
+            already finished in the browser.
+          </li>
+          <li>
+            <strong>Update Location</strong>: The new image URLs are added to
+            the <code>photos_s3</code> attribute, which is stored as a list of
+            strings in the database (<code
+              >field :photos_s3, {:array, :string}</code
+            >). This allows each location to have multiple associated images
+            stored in S3.
+          </li>
+          <li>
+            <strong>UI Update Path</strong>: After a successful update, this
+            LiveView does not mutate the stream directly. The context broadcasts
+            the updated location, and <code>handle_info/2</code> receives it and
+            calls <code>stream_insert/3</code>. This keeps all clients
+            (including the current one) in sync via a single code path.
+          </li>
+        </ol>
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"remove" Event</strong>:</p>
+    <ul>
+      <li>
+        Triggered when the user clicks the trash icon next to a location in the
+        grid:
+        <ol>
+          <li>
+            <strong>Retrieve Location</strong>: The <code>location_id</code> is
+            used to fetch the selected location using
+            <code>Locations.get_location!/1</code>.
+          </li>
+          <li>
+            <strong>Remove URLs from Database</strong>: The
+            <code>photos_s3</code> field is set to an empty list
+            (<code>[]</code>), removing all image URL references from the
+            database. This breaks the association between the location and the
+            images.
+          </li>
+          <li>
+            <strong>S3 Files Remain Untouched</strong>: The actual image files
+            continue to exist in the S3 bucket and consume storage space. To
+            fully delete images, you would need to implement separate S3
+            deletion logic using the AWS SDK.
+          </li>
+        </ol>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>handle_info/2</code></h3>
+<p>
+  Handles real-time updates when locations are modified by other users. Pattern
+  matches on
+  <code>{LivePlayground.Locations, {:update_location, location}}</code> messages
+  and uses <code>stream_insert/3</code> to update the UI. This ensures all
+  connected users immediately see changes, including uploaded images and removed
+  images, without page refreshes.
+</p>
+
+<h3><code>to_integer/1</code></h3>
+<p>
+  Safely converts form parameters to integers. Handles both integer and string
+  inputs, returning 0 as a fallback for invalid string values. This ensures
+  robust parameter handling when extracting location IDs from form data.
+</p>
+
+<h3>S3 Upload Workflow: What Happens Where</h3>
+
+<p>
+  Cloud uploads can be confusing because the work is split between multiple
+  systems. Here's exactly what happens in each part of the system when a user
+  uploads a file:
+</p>
+
+<h4>Step 1: User Selects Files (Browser)</h4>
+<ul>
+  <li>
+    <strong>What happens</strong>: User clicks "Choose files" or drags files
+    into the upload area
+  </li>
+  <li><strong>Where it happens</strong>: In the user's browser</li>
+  <li>
+    <strong>Technical detail</strong>: Browser's file input captures the files
+    but doesn't send them anywhere yet
+  </li>
+</ul>
+
+<h4>
+  Step 2: LiveView Generates Presigned Upload Instructions (Phoenix Server)
+</h4>
+<ul>
+  <li>
+    <strong>What happens</strong>: LiveView calls
+    <code>presign_upload/2</code> for each file
+  </li>
+  <li><strong>Where it happens</strong>: On your Phoenix server</li>
+  <li>
+    <strong>What gets created</strong>: A presigned URL plus required form
+    fields (“upload instructions”) the browser will use for a time-limited
+    upload
+  </li>
+  <li>
+    <strong>How it’s generated</strong>: The server calls
+    <code>SimpleS3Upload.sign_form_upload/3</code> (see
+    <code>lib/live_playground/simple_s3_upload.ex</code>) to build the SigV4
+    policy and signature. This does not contact AWS; it computes the signature
+    locally using your AWS keys and the configured region/bucket.
+  </li>
+  <li>
+    <strong>Why this matters</strong>: Your server authorizes uploads without
+    handling the file data itself
+  </li>
+</ul>
+
+<h4>Step 3: Browser Uploads Directly to S3 (Browser JavaScript + S3)</h4>
+<ul>
+  <li>
+    <strong>What happens</strong>: LiveView’s browser-side uploader
+    (<code>assets/js/uploaders/S3.js</code>) uses the upload instructions to
+    POST the file to S3
+  </li>
+  <li>
+    <strong>Where it happens</strong>: Browser → Amazon S3 (Phoenix server is
+    not involved)
+  </li>
+  <li>
+    <strong>Why this is powerful</strong>: Large files don’t touch your server’s
+    CPU or bandwidth
+  </li>
+  <li>
+    <strong>The magic</strong>: Files go straight from the user’s computer to S3
+  </li>
+</ul>
+
+<h4>Step 4: LiveView Records What Was Uploaded (Phoenix Server)</h4>
+<ul>
+  <li>
+    <strong>What happens</strong>: After S3 confirms the upload worked,
+    <code>consume_uploaded_entries/3</code> runs
+  </li>
+  <li><strong>Where it happens</strong>: Back on your Phoenix server</li>
+  <li><strong>What it does</strong>: Saves the S3 URLs to your database</li>
+  <li>
+    <strong>Why this step exists</strong>: Your app needs to remember which
+    files belong to which locations
+  </li>
+</ul>
+
+<h4>The Key Insight: Your Server Never Sees the File Data</h4>
+<p>
+  In traditional uploads, files flow like this:<br />
+  <code>User → Phoenix Server → Database/Storage</code>
+</p>
+<p>
+  In cloud uploads, files flow like this:<br />
+  <code>User → S3 (Phoenix just watches and records the URLs)</code>
+</p>
+
+<p>
+  This means your Phoenix server stays fast even when users upload huge files,
+  because the files bypass your server entirely. Your server only handles the
+  lightweight work of creating permissions and recording URLs.
+</p>

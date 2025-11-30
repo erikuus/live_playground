@@ -1,0 +1,140 @@
+<p>
+  The <code>SendAfter</code> module is designed to automatically refresh and
+  display server statistics at regular intervals. Here's a detailed look at its
+  components and functionality:
+</p>
+<h3><code>mount/3</code></h3>
+<p>Invoked when the LiveView is mounted:</p>
+<ul>
+  <li>
+    It checks if the socket is connected using <code>connected?(socket)</code>.
+    This prevents scheduling the <code>:refresh</code> message during initial
+    server-side rendering, where updates wouldn't reach the client anyway. This
+    optimization reduces server load and prevents unnecessary message scheduling
+    during static page generation.
+  </li>
+  <li>
+    It schedules a <code>:refresh</code> message to be sent to itself after
+    <code>@refresh_interval</code> milliseconds (in this case, 2000 ms or 2
+    seconds) using <code>Process.send_after/3</code>.
+  </li>
+  <li>
+    The <code>assign_stats/1</code> helper function is called to fetch and
+    assign the initial server statistics to the socket's assigns.
+  </li>
+</ul>
+<h3><code>render/1</code></h3>
+<p>This function renders the assigned server statistics within the template:</p>
+<ul>
+  <li>
+    It uses a custom component <code>.stats</code> that defines a layout for the
+    statistics dashboard.
+  </li>
+  <li>
+    Within this component, it uses the <code>&lt;:card&gt;</code> subcomponent
+    to display each server metric. The <code>title</code> attribute provides a
+    label for each card, and the corresponding statistic is rendered within it.
+  </li>
+  <li>
+    The three metrics displayed are:
+    <strong>Active Connections</strong> (current server load),
+    <strong>Requests/sec</strong> (throughput), and
+    <strong>Response Time (ms)</strong> (performance).
+  </li>
+</ul>
+<h3><code>handle_info/2</code></h3>
+<p>
+  Handles the <code>:refresh</code> message and creates a self-sustaining
+  refresh cycle:
+</p>
+<ul>
+  <li>
+    When a <code>:refresh</code> message is received (which happens every 2
+    seconds), it calls the <code>assign_stats/1</code> function again to update
+    the server statistics in the assigns with the latest data.
+  </li>
+  <li>
+    It then schedules another <code>:refresh</code> message using
+    <code>Process.send_after/3</code> to continue the cycle. This creates a
+    self-sustaining loop where each refresh automatically schedules the next
+    one.
+  </li>
+  <li>
+    The cycle continues until the LiveView process terminates (when the user
+    navigates away or closes the browser), at which point the scheduled messages
+    are automatically cleaned up.
+  </li>
+</ul>
+<h3>Helper Function</h3>
+<h4><code>assign_stats/1</code></h4>
+<p>
+  This helper function fetches the latest server statistics by calling functions
+  from the <code>Stats</code> context/module:
+</p>
+<ul>
+  <li>
+    <code>Stats.active_connections()</code> to get the current number of active
+    connections.
+  </li>
+  <li>
+    <code>Stats.requests_per_second()</code> to get the current request
+    throughput.
+  </li>
+  <li>
+    <code>Stats.response_time_ms()</code> to get the current average response
+    time in milliseconds.
+  </li>
+</ul>
+<p>
+  The fetched statistics are assigned to the socket, ready to be used in the
+  render function. This realistic server monitoring data demonstrates how
+  interval-based updates are particularly valuable for system monitoring
+  dashboards.
+</p>
+<h3>Processes in Phoenix LiveView</h3>
+<ul>
+  <li>
+    When a LiveView is instantiated, it runs within its own Elixir process. This
+    is a separate lightweight thread of execution that maintains the LiveView's
+    state and handles events.
+  </li>
+  <li>
+    This process starts when the LiveView is mounted via the
+    <code>mount/3</code> function and continues to exist until the user's
+    session ends, for example, by navigating away from the page or closing the
+    browser, at which point the process is terminated.
+  </li>
+  <li>
+    <code>Process.send_after/4</code> is used to schedule a message (<code
+      >:refresh</code
+    >
+    in this case) to be sent to the process after a set amount of time
+    (<code>@refresh_interval</code>). This is an asynchronous action; the
+    process continues to execute other work, such as rendering templates or
+    handling user interactions, without blocking or waiting for this time to
+    elapse.
+  </li>
+</ul>
+<h3>Timer Pattern: <code>send_after</code> vs <code>send_interval</code></h3>
+<p>
+  This module uses <code>Process.send_after/3</code> instead of
+  <code>Process.send_interval/3</code>
+  for periodic updates. Here's why:
+</p>
+<ul>
+  <li>
+    <strong>send_after</strong>: Sends a single message after a delay, creating
+    a self-sustaining cycle where each message handler schedules the next
+    message.
+  </li>
+  <li>
+    <strong>send_interval</strong>: Automatically sends repeated messages at
+    fixed intervals, but requires manual timer cancellation in
+    <code>terminate/2</code>.
+  </li>
+  <li>
+    The <code>send_after</code> pattern is simpler because it doesn't require
+    explicit cleanup - when the process terminates, any pending messages are
+    automatically discarded.
+  </li>
+</ul>

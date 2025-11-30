@@ -1,0 +1,377 @@
+<p>
+  The <code>TabularInsert</code> module demonstrates how to build dynamic forms
+  where users can add multiple rows and submit them all at once. It handles
+  partial failures gracefully - if some rows have validation errors, the valid
+  ones still get saved while the problematic rows remain in the form for fixing.
+</p>
+
+<h3><code>mount/3</code></h3>
+<p>
+  Sets up the LiveView with three key components that enable dynamic tabular
+  forms with real-time collaboration:
+</p>
+<ul>
+  <li>
+    <strong>Real-time Subscription</strong>: Uses
+    <code>Cities.subscribe()</code> to listen for city changes from other users,
+    but only when the socket is connected to prevent unnecessary subscriptions
+    during server-side pre-rendering. This creates a collaborative environment
+    where users can see cities being added or removed by others in real-time.
+    (For more details about broadcasting patterns, see the
+    <a href="/broadcast">broadcast recipes</a>.)
+  </li>
+  <li>
+    <strong>Stream Configuration</strong>: Sets up streams for both the dynamic
+    input forms and the city results table. Streams allow for real-time updates
+    without full page reloads - when cities are added or deleted by any user,
+    only the affected rows update rather than re-rendering the entire interface.
+    (For more details about stream patterns, see the
+    <a href="/stream-insert">stream recipes</a>.)
+  </li>
+  <li>
+    <strong>Tabular Input Setup</strong>: Initializes the dual tracking system
+    that makes dynamic forms work - a stream to hold each row's form data and
+    validation state, plus an ID list to map form submission data back to
+    specific input rows.
+  </li>
+</ul>
+<h4>Why The Dual Tracking System?</h4>
+<p>
+  Dynamic forms create specific technical challenges that require careful state
+  management:
+</p>
+<ul>
+  <li>
+    <strong>Why Hold Input Rows in Streams?</strong>
+    <p>
+      The main reason we hold input rows in streams is to preserve user data
+      during dynamic operations. Without streams, adding or removing a row would
+      re-render the entire template, causing all existing inputs to lose their
+      typed content. Imagine a user fills out 3 rows of city data, then clicks
+      "Add Row" - streams ensure only the new row gets added to the DOM while
+      preserving all the data they've already typed in the existing rows.
+    </p>
+  </li>
+  <li>
+    <strong>Why The Dual Tracking Pattern?</strong>
+    <ul>
+      <li>
+        <strong>Stream IDs Handle Most Operations</strong>: Each stream item
+        contains its own ID (<code>%{id: 2, form: ...}</code>) which handles DOM
+        rendering, adding/removing rows, and displaying validation errors. This
+        ID is sufficient for most dynamic form operations.
+      </li>
+      <li>
+        <strong>The Core Problem: A Structural Mismatch</strong>
+        <p>
+          An HTML form with multiple inputs of the same name submits data
+          grouped by field, not by row. For example, two input rows will produce
+          a single map like this:
+          <code
+            >%{"name" => ["City A", "City B"], "district" => ["District A",
+            "District B"]}</code
+          >
+        </p>
+        <p>
+          The data is organized into lists under each field name, losing the
+          original row structure. When validation fails for "City A", we only
+          know it's at position <code>0</code> in the <code>name</code> list. We
+          have no direct way to link this error back to the specific stream item
+          (e.g., the one with <code>id="tabular_inputs-2"</code>) that needs to
+          display the error message.
+        </p>
+      </li>
+      <li>
+        <strong>Validation Error Mapping</strong>: When validation fails (like
+        empty population at position 0), you need to know which stream item
+        should display the error. The separate ID list
+        <code>[2, 7]</code> provides this mapping based on order - position 0
+        maps to the first ID (2), position 1 maps to the second ID (7), and so
+        on.
+      </li>
+      <li>
+        <strong>Form Submission Processing</strong>: The
+        <code>convert_params/2</code> function uses the ID list to reconstruct
+        which form data belongs to which row, enabling proper validation error
+        placement and partial success handling.
+      </li>
+      <li>
+        <strong>Template Counting Bonus</strong>: As a side benefit, the ID list
+        also enables counting in templates (for show/hide logic) since streams
+        cannot be enumerated during render.
+      </li>
+      <li>
+        <strong>Alternative Considered</strong>: While you could use hidden form
+        inputs to submit row IDs alongside the data, this would still require
+        the same mapping logic while adding more form state complexity. The dual
+        tracking pattern keeps concerns separated - streams handle user data,
+        server state handles mapping.
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>terminate/2</code></h3>
+<p>
+  Properly cleans up the PubSub subscription when the LiveView session ends
+  using <code>Cities.unsubscribe()</code>. This prevents memory leaks in the
+  PubSub registry and ensures that broadcast messages aren't sent to dead
+  processes, maintaining optimal application performance.
+</p>
+
+<h3><code>render/1</code></h3>
+<ul>
+  <li>
+    <strong>Dynamic Tabular Form</strong>: Creates a form with
+    `phx-submit="save"` that contains a stream-updated container for tabular
+    inputs. Each stream item is a tuple (<code>%{id: 2, form: ...}</code>) where
+    the ID becomes the DOM ID for that input row
+    (<code>id="tabular_inputs-2"</code>). This DOM ID connection is essential -
+    it's what allows LiveView to efficiently add, remove, and update specific
+    rows without losing user-typed content. Each input row includes name,
+    district, and population fields with a minus-icon button for individual row
+    removal. The form automatically handles list submission when multiple rows
+    with the same field names are present.
+  </li>
+  <li>
+    <strong>Add/Save Button Logic</strong>: Shows a plus-icon "Add" button only
+    when under the `@max_tabular_inputs` limit, and a "Save" button only when
+    there are actual rows to submit. This conditional display prevents users
+    from adding too many rows or submitting empty forms, using the separate ID
+    list for counting since streams cannot be enumerated in templates.
+  </li>
+  <li>
+    <strong>Results Table with Real-Time Updates</strong>: Displays existing
+    cities in a table enhanced with stream identifiers (<code>id="cities"</code>
+    and <code>phx-update="stream"</code>). Each row shows the city's data plus a
+    delete button with JavaScript command chaining:
+    <code
+      >phx-click={JS.push("delete", value: %{id: city.id}) |>
+      hide("##{id}")}</code
+    >. This provides immediate UI feedback by hiding the row instantly while the
+    server processes the deletion, creating responsive UX where users see
+    immediate feedback rather than waiting for the server round-trip.
+  </li>
+  <li>
+    <strong>Selective Rendering Demonstration</strong>: Each city row displays a
+    timestamp using `{DateTime.utc_now()}` that serves as visual proof of LiveView's
+    selective update capability. When a new city is added, only that row shows
+    the current timestamp while existing rows retain their original timestamps,
+    demonstrating that streams only re-render what actually changed.
+  </li>
+</ul>
+
+<h3><code>handle_event/3</code></h3>
+<p>Manages user interactions:</p>
+<ul>
+  <li>
+    <p><strong>"add-tabular-input"</strong></p>
+    <ul>
+      <li>
+        <strong>Server-Side Validation</strong>: Enforces
+        <code>@max_tabular_inputs</code>
+        limit on the server as a defensive guard, even though the UI should
+        prevent this. Never trust client-side constraints alone.
+      </li>
+      <li>
+        <strong>Incremental ID Generation</strong>: Uses
+        <code>List.last + 1</code> to generate predictable, sequential IDs
+        within each LiveView session. While UUIDs could work, incremental IDs
+        ensure that form submission lists map to stream items in a predictable
+        order - lower IDs always correspond to lower list indices, making
+        debugging and reasoning about the code much easier.
+      </li>
+      <li>
+        <strong>Dual State Updates</strong>: Updates both the stream (for
+        rendering and validation display) and the ID tracking list (for form
+        submission mapping). The stream gets a new item with a fresh form from
+        <code>get_empty_form()</code>, while the ID list gets the new ID
+        appended to maintain proper order for list mapping.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"remove-tabular-input"</strong></p>
+    <ul>
+      <li>
+        <strong>Stream Deletion by Unique Identifier</strong>: Uses
+        <code>stream_delete/3</code> which doesn't necessarily require an ID
+        field - it simply needs a unique identifier to locate and remove the
+        element from the stream. For example, if a stream contains maps with
+        keys <code>:code</code>, <code>:firstname</code>, and
+        <code>:lastname</code>, you can remove an entry by specifying the unique
+        <code>:code</code> value:
+        <code>stream_delete(socket, :persons, %{code: unique_code})</code>.
+      </li>
+      <li>
+        <strong>Dual State Cleanup</strong>: Removes the row from both the
+        stream (for DOM rendering) and the ID tracking list (for form submission
+        mapping).
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"save"</strong></p>
+    <ul>
+      <li>
+        <strong>Form Data Mapping</strong>: HTML inputs marked
+        <code>multiple={true}</code> submit lists like
+        <code
+          >%{"name" => ["Tallinn", "Tartu"], "district" => ["Harju",
+          "Tartu"]}</code
+        >. The <code>convert_params/2</code> function uses the ID tracking list
+        to map positions back to specific rows - position 0 maps to the first
+        ID, position 1 to the second, etc. This produces individual parameter
+        maps for each row while adding the fixed country code:
+        <code
+          >[{2, %{"name" => "Tallinn", "district" => "Harju", "countrycode" =>
+          "EST"}}, {7, %{"name" => "Tartu", "district" => "Tartu", "countrycode"
+          => "EST"}}]</code
+        >
+      </li>
+      <li>
+        <strong>Partial Success Strategy</strong>: Processes each row
+        individually using <code>Enum.reduce/3</code>, allowing successful rows
+        to be saved and removed from the form while failed rows stay visible
+        with their validation errors.
+      </li>
+      <li>
+        <strong>Stream State Management</strong>: The <code>Enum.reduce</code>
+        loop manages the state of each row based on the outcome:
+        <ul>
+          <li>
+            <strong>On Success</strong>: The row is removed from the
+            <code>:tabular_inputs</code> stream using
+            <code>stream_delete</code>, and the newly created city is added to
+            the <code>:cities</code> stream. The row's ID is also removed from
+            the <code>@tabular_input_ids</code> tracking list.
+          </li>
+          <li>
+            <strong>On Failure</strong>: The original item is
+            <em>replaced</em> in the <code>:tabular_inputs</code> stream.
+            <code>stream_insert</code> is called with the same ID but with a new
+            form containing the validation errors:
+            <code>%{id: id, form: to_form(changeset)}</code>. This replacement
+            is what makes the validation errors appear on the correct row in the
+            UI.
+          </li>
+        </ul>
+      </li>
+      <li>
+        <strong>Flash Message Strategy</strong>: Collects results during
+        processing and shows a single summary flash message instead of multiple
+        individual messages. The <code>Enum.reduce/3</code> accumulates both the
+        updated socket and a results map tracking successful and failed
+        operations. After processing all rows,
+        <code>put_summary_flash/2</code> generates contextual messages like "3
+        cities added", "2 cities need fixes", or "2 cities added, 1 needs fixes"
+        for mixed results. This provides clear user feedback without
+        overwhelming the interface with multiple flash messages during batch
+        operations.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"delete"</strong></p>
+    <ul>
+      <li>
+        <strong>Server Processing</strong>: Deletes the city from the database
+        using <code>Cities.delete_city_broadcast/1</code> and removes it from
+        the current session's stream using <code>stream_delete/3</code>.
+      </li>
+      <li>
+        <strong>Real-Time Broadcasting</strong>: The <code>Cities</code> context
+        broadcasts the change to other sessions, which remove the row via
+        <code>handle_info/2</code>.
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>handle_info/2</code></h3>
+<p>
+  Processes real-time broadcasts from other users, enabling collaborative
+  editing:
+</p>
+<ul>
+  <li>
+    <strong><code>{LivePlayground.Cities, {:create_city, city}}</code></strong
+    >: When another user successfully saves a city, this message adds it to the
+    top of the results stream using <code>stream_insert/4</code> with
+    <code>at: 0</code>. Also shows a notification flash to inform the current
+    user about the collaborative change.
+  </li>
+  <li>
+    <strong><code>{LivePlayground.Cities, {:delete_city, city}}</code></strong
+    >: When another user deletes a city, removes it from the current user's
+    results stream using <code>stream_delete/3</code>.
+  </li>
+  <li>
+    These broadcasts only update the results table, never the tabular input
+    form. This preserves users' work-in-progress while keeping them informed of
+    changes made by their teammates.
+  </li>
+</ul>
+
+<h3>Helper Functions</h3>
+<ul>
+  <li>
+    <strong><code>get_empty_form/0</code></strong
+    >: Builds a blank Phoenix form for a new tabular row so fields and
+    validations are set up correctly.
+  </li>
+  <li>
+    <strong><code>to_integer/1</code></strong
+    >: Parses string IDs and falls back to <code>0</code> for invalid input; in
+    this view, <code>0</code> safely results in no deletion. Use strict handling
+    if you need to detect invalid IDs explicitly.
+  </li>
+  <li>
+    <strong><code>convert_params/2</code></strong
+    >: This is the function that solves the structural mismatch from the form
+    submission. It takes the flat lists of parameters (e.g.,
+    <code>%{"name" => ["A", "B"]}</code>) and the ordered list of row IDs (e.g.,
+    <code>[2, 7]</code>) and transforms them back into a row-oriented data
+    structure.
+    <p>
+      It produces a list of tuples, where each tuple contains the original row
+      <code>id</code> and a complete parameter map for that single row:
+      <code>[{2, %{"name" => "A", ...}}, {7, %{"name" => "B", ...}}]</code>
+    </p>
+    <p>
+      This structure is ideal because it allows the
+      <code>handle_event("save", ...)</code> function to process each submitted
+      row individually in the <code>Enum.reduce</code> loop, enabling the
+      partial success/failure logic.
+    </p>
+    <p><strong>The Magic Explained:</strong></p>
+    <ul>
+      <li>
+        Create pairs of ID and position using
+        <code>Enum.with_index(tabular_input_ids)</code> - transforms
+        <code>[2, 7]</code> into <code>[{2, 0}, {7, 1}]</code>
+      </li>
+      <li>
+        For each ID and position pair, use
+        <code>Enum.reduce</code>
+        to walk through each field name ("name", "district") and its value list
+        (["Tallinn", "Tartu"]), "fishing out" data from the same position using
+        <code>Enum.at(value_list, index)</code> to rebuild each row's complete
+        data
+      </li>
+      <li>
+        Add the fixed country code and pair with the original ID to get
+        <code>{2, %{"name" => "Tallinn", ...}}</code>
+      </li>
+    </ul>
+  </li>
+  <li>
+    <strong><code>put_summary_flash/2</code></strong
+    >: Generates contextual flash messages based on batch operation results.
+    Uses pattern matching to handle different scenarios: all successful ("3
+    cities added"), all failed ("2 cities need fixes"), or mixed results ("2
+    cities added, 1 needs fixes"). This prevents multiple flash messages during
+    batch operations and provides clear user feedback about the overall
+    operation outcome.
+  </li>
+</ul>

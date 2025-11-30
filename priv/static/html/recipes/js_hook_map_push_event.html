@@ -1,0 +1,220 @@
+<p>
+  The <code>JsHookMapPushEvent</code> module demonstrates the bidirectional
+  communication pattern between Phoenix LiveView and JavaScript. Unlike passing
+  data one-way through datasets, this approach allows JavaScript to send events
+  back to LiveView, creating interactive experiences where map clicks update the
+  server state and trigger UI changes.
+</p>
+<h3><code>mount/3</code></h3>
+<p>This function initializes the LiveView and prepares the necessary data:</p>
+<ul>
+  <li>
+    Retrieves Estonian locations as a list using
+    <code>Locations.list_est_location/0</code>, then creates a map using
+    <code>Map.new(locations, &{&1.id, &1})</code> for efficient ID-based
+    lookups.
+  </li>
+  <li>
+    Assigns the location data to both <code>:location_map</code> (for efficient
+    lookups) and <code>:locations</code> (the original list for template
+    iteration), and sets <code>:selected</code> to <code>nil</code>. The
+    <code>:selected</code> assign tracks which location is currently
+    highlighted, demonstrating how LiveView maintains interaction state.
+  </li>
+</ul>
+<h3><code>render/1</code></h3>
+<p>Defines the HTML structure sent to the client:</p>
+<ul>
+  <li>
+    <p><strong>Map Hook Element</strong>:</p>
+    <ul>
+      <li>
+        The <code>div</code> with <code>id="map"</code> is the target for the JS
+        hook and must have a unique <code>id</code>.
+      </li>
+      <li>
+        The <code>phx-hook="MapPushEvents"</code> attribute attaches the JS hook
+        named <code>MapPushEvents</code> (which is defined in
+        <code>app.js</code>).
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>List of Locations</strong>:</p>
+    <ul>
+      <li>
+        Displays location names by iterating over <code>@locations</code>. This
+        uses the pre-computed list for efficient template rendering.
+      </li>
+      <li>
+        Renders each location as a <code>div</code> with a unique ID
+        (<code>location-#{location.id}</code>) and conditional CSS classes. When
+        <code>location == @selected</code> is true, the background changes to
+        highlight the selected item using
+        <code>location == @selected && "rounded-md bg-zinc-100"</code>.
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3><code>handle_event/3</code></h3>
+<p>Handles events pushed from the frontend to the LiveView:</p>
+<ul>
+  <li>
+    <p><strong>"get-locations"</strong>:</p>
+    <ul>
+      <li>
+        This event is triggered when the map initializes in the JS hook (see
+        <code>assets/js/hooks/map-push-events.js</code>). The hook needs
+        location data to render markers, so it requests this data from LiveView.
+      </li>
+      <li>
+        LiveView responds with
+        <code>{:reply, %{locations: socket.assigns.locations}, socket}</code> -
+        the <code>:reply</code> pattern sends the locations data directly back
+        to the JavaScript hook, which then uses it to populate the map with
+        markers.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>"marker-clicked"</strong>:</p>
+    <ul>
+      <li>Receives the location ID from the JavaScript marker click event.</li>
+      <li>
+        Uses <code>get_location_by_id/2</code> helper to locate the matching
+        location struct with efficient map lookup.
+      </li>
+      <li>
+        Returns
+        <code
+          >{:reply, %{location: location}, assign(socket, selected:
+          location)}</code
+        >
+        - this single operation accomplishes two synchronized updates:
+        <code>%{location: location}</code> is sent to the JavaScript hook to
+        trigger immediate map interactions (like scrolling the selected location
+        into view), while
+        <code>assign(socket, selected: location)</code> updates LiveView state
+        to re-render the DOM and highlight the selected item in the list.
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3><code>get_location_by_id/2</code></h3>
+<p>
+  This helper function demonstrates an efficient pattern for ID-based lookups in
+  LiveView applications.
+</p>
+<p>
+  <strong>Why a Map Instead of a List?</strong> Using
+  <code>Map.get/2</code> provides O(1) constant-time lookups, while searching
+  through a list with <code>Enum.find/2</code> would be O(n) linear time:
+</p>
+<pre><code># Efficient O(1) approach - current implementation
+defp get_location_by_id(socket, id) do
+  Map.get(socket.assigns.location_map, id)
+end
+
+# Inefficient O(n) approach - avoid this pattern
+defp find_location_in_list(socket, id) do
+  Enum.find(socket.assigns.locations, &(&1.id == id))
+end</code></pre>
+<p>
+  The <code>Locations.get_est_location_map/0</code> function handles the
+  list-to-map transformation in the context layer, keeping the LiveView focused
+  on event handling while ensuring efficient lookups.
+</p>
+
+<h3>JavaScript Hook (<code>MapPushEvents</code>)</h3>
+<p>
+  The JS hook is critical for pushing events from the client-side to LiveView:
+</p>
+<ul>
+  <li>
+    <p><strong>Hook Registration (<code>app.js</code>)</strong>:</p>
+    <ul>
+      <li>
+        The <code>MapPushEvents</code> hook is registered in
+        <code>assets/js/app.js</code>.
+      </li>
+      <li>
+        This hook is made available to LiveView through the
+        <code>LiveSocket</code> configuration.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <p>
+      <strong>Hook Implementation (<code>map-push-events.js</code>)</strong>:
+    </p>
+    <ul>
+      <li>
+        When the LiveView component is mounted, the
+        <code>mounted()</code> function in <code>MapPushEvents</code> is
+        triggered:
+        <ul>
+          <li>
+            The map is created with a click event handler that calls
+            <code>this.pushEvent("marker-clicked", locationId)</code> and
+            includes a callback to scroll the selected location into view using
+            <code>this.scrollTo(reply.location.id)</code>.
+          </li>
+          <li>
+            After the map and click handlers are set up, the hook calls
+            <code>this.pushEvent("get-locations")</code> to request location
+            data from LiveView.
+          </li>
+          <li>
+            When the location data is received, markers are added to the map and
+            <code>this.map.fitMarkers()</code> adjusts the view to show all
+            markers.
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Event-Driven Communication Flow</h3>
+<p>
+  This pattern creates a conversation between LiveView and JavaScript through
+  events:
+</p>
+<ol>
+  <li>
+    <strong>Initial Data Request</strong>: When the map initializes, the hook
+    calls <code>pushEvent("get-locations")</code> and LiveView responds with
+    <code>{:reply, %{locations: ...}}</code> to populate the map with markers.
+  </li>
+  <li>
+    <strong>User Interaction</strong>: When a user clicks a marker, the hook
+    calls <code>pushEvent("marker-clicked", id)</code> and LiveView both updates
+    its state and replies with the selected location data.
+  </li>
+  <li>
+    <strong>Synchronized Updates</strong>: The LiveView state change triggers a
+    DOM re-render to highlight the selected location in the list, while the
+    JavaScript callback handles immediate map interactions like scrolling.
+  </li>
+</ol>
+
+<h3>Reply Pattern for Hooks</h3>
+<p>
+  The <code>:reply</code> tuple is essential for hook communication and differs
+  from regular LiveView events:
+</p>
+<ul>
+  <li>
+    Use <code>{:noreply, socket}</code> - only update LiveView state, trigger
+    DOM re-renders
+  </li>
+  <li>
+    Use <code>{:reply, data, socket}</code> - update LiveView state AND send
+    data back to the specific JavaScript hook that triggered the event
+  </li>
+  <li>
+    Hooks often need immediate data responses (like location details for map
+    updates) that can't wait for a DOM re-render cycle
+  </li>
+</ul>

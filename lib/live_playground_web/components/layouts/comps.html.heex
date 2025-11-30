@@ -1,0 +1,14 @@
+<.flash_group flash={@flash} />
+<.auth_menu :if={!@current_scope || !@current_scope.user} id="auth-menu-header" current_user={nil} class="hidden lg:flex justify-end px-6 lg:px-8 py-4" />
+<.multi_column_layout>
+  <:narrow_sidebar>
+    <Sidebar.menu current_layout={:comps} current_user={@current_scope && @current_scope.user} />
+  </:narrow_sidebar>
+  <:mobile_menu>
+    <Comps.menu id="comps-mobile-menu" current_path={@current_path} />
+  </:mobile_menu>
+  <:desktop_menu hook="PreserveScroll">
+    <Comps.menu id="comps-destop-menu" current_path={@current_path} />
+  </:desktop_menu>
+  {@inner_content}
+</.multi_column_layout>

@@ -1,0 +1,121 @@
+<p>
+  The <code>FormValidateOnChange</code> module is designed for adding new city
+  records to the database with real-time validation feedback. Unlike forms that
+  only validate on submit, this module validates as users type, providing
+  immediate feedback on input validity. This approach helps users catch and fix
+  errors early, creating a more interactive experience, though it can be more
+  resource-intensive due to frequent validation requests.
+</p>
+<h3><code>mount/3</code></h3>
+<p>
+  The function initializes the LiveView by loading a list of cities for a
+  specific country using <code>Cities.list_country_city/1</code>. It also
+  prepares an empty form for new city entries by calling
+  <code>get_empty_form/0</code>. This helper first creates a blank
+  <code>City</code> struct, then wraps it in a changeset using
+  <code>Cities.change_city/1</code> to enable validation rules and error
+  tracking. Finally, it converts the changeset into a LiveView form structure
+  using <code>to_form/1</code>, so the template can display validation errors
+  and preserve user input.
+</p>
+
+<h3>What is a Changeset?</h3>
+<p>
+  As a developer, you'll use <code>changeset</code> all the time in Phoenix and
+  Ecto, but it's easy to miss what it actually does. Think of a changeset as a
+  smart container for user input: it holds the original struct (like
+  <code>City</code>), any new data the user tries to submit, and a set of rules
+  for what's valid. When you build a changeset, you tell it what fields are
+  required, what values are allowed, and any custom checks you need. If the user
+  enters something invalid, the changeset collects those errors so you can show
+  helpful messages in your form. In LiveView, changesets are the bridge between
+  your backend validation and the interactive UI—they keep user input,
+  validation, and error messages all in sync, so you never lose what the user
+  typed, even if there are mistakes.
+</p>
+<h3><code>render/1</code></h3>
+<p>The rendering function constructs the HTML:</p>
+<ul>
+  <li>
+    A form for city data input configured to handle both "validate" and "save"
+    events. It includes input fields for the city's name, district, and
+    population, each debounced to delay event firing for 2000 milliseconds,
+    reducing the frequency of validation requests as the user types.
+  </li>
+  <li>
+    A table displaying the list of cities, conditionally shown if city data is
+    present. Each city's details are formatted for both mobile and desktop
+    views.
+  </li>
+</ul>
+<h3><code>handle_event/3</code></h3>
+<p>This function handles two main types of user interactions:</p>
+<ul>
+  <li>
+    <strong>"validate"</strong>
+    <p>This event handler processes real-time form validation as users type:</p>
+    <ul>
+      <li>
+        It adds the necessary country code to the form parameters and creates a
+        changeset using <code>Cities.change_city/1</code> with the current user
+        input.
+      </li>
+      <li>
+        The changeset has its action set to <code>:validate</code> using
+        <code>Map.put(changeset, :action, :validate)</code>. This tells the
+        changeset to show validation errors immediately.
+      </li>
+      <li>
+        The changeset is converted to a form using <code>to_form/1</code> and
+        assigned back to the socket. This updates the form state with any
+        validation errors or confirmations, allowing users to see feedback
+        immediately without submitting the form.
+      </li>
+    </ul>
+  </li>
+  <li>
+    <strong>"save"</strong>
+    <p>This event handler processes form submissions:</p>
+    <ul>
+      <li>
+        If the city is successfully created using
+        <code>Cities.create_city/1</code>, the new city is prepended to the list
+        of cities in the LiveView's state using <code>update/3</code>, the form
+        is reset to an empty state using <code>get_empty_form/0</code>, and a
+        flash message is displayed to the user. This ensures the UI immediately
+        reflects the new entry and provides feedback.
+      </li>
+      <li>
+        If there's a validation error, the changeset is converted back to form
+        state using <code>to_form/1</code> to display validation errors. The
+        form is re-rendered with the user's input and corresponding error
+        messages, allowing users to correct mistakes without losing their input.
+      </li>
+    </ul>
+  </li>
+</ul>
+<h3>Alternative List Management Strategies</h3>
+<p>
+  While this demo uses simple prepending for immediate feedback, production
+  applications often need more sophisticated list management:
+</p>
+<ul>
+  <li>
+    Use <code>Enum.sort_by/3</code> to maintain alphabetical ordering after
+    adding cities:
+    <pre><code>socket
+|> update(:cities, fn cities ->
+  [city | cities]
+  |> Enum.sort_by(& &1.name, :asc)
+end)</code></pre>
+  </li>
+  <li>
+    For large datasets, streams provide efficient handling of thousands of items
+    with automatic DOM updates. See the dedicated stream recipes for detailed
+    examples and implementation patterns.
+  </li>
+  <li>
+    Combine with pagination for very large city lists, allowing users to
+    navigate through results without overwhelming the interface.
+  </li>
+</ul>

@@ -1,0 +1,84 @@
+/* See the Tailwind configuration guide for advanced usage
+   https://tailwindcss.com/docs/configuration */
+
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/live_playground_web";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* Tailwind CSS plugins */
+@plugin "@tailwindcss/forms";
+@plugin "@tailwindcss/typography";
+
+/* Custom theme configuration (replaces tailwind.config.js in Tailwind 4) */
+@theme {
+  --color-brand: #FD4F00;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+@custom-variant phx-no-feedback (.phx-no-feedback&, .phx-no-feedback &);
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar,
+::-webkit-scrollbar-corner {
+  background: transparent;
+  height: 12px;
+  width: 12px;
+}
+::-webkit-scrollbar-button {
+  height: 0;
+  width: 0;
+}
+::-webkit-scrollbar-thumb {
+  background: content-box currentColor;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: #dadce0;
+  min-height: 48px;
+  min-width: 48px;
+}
+
+/* Override Makeup syntax highlighting background only within #rules-page */
+#rules-page .highlight {
+  background-color: #f4f4f5 !important; /* matches bg-zinc-100 */
+}
+
+/* Cursor pointer for interactive elements (Tailwind 4 forms plugin removes default cursor) */
+button:not(:disabled),
+[type="button"]:not(:disabled),
+[type="submit"]:not(:disabled),
+[type="reset"]:not(:disabled),
+[role="button"]:not(:disabled),
+a[href],
+summary {
+  cursor: pointer;
+}
+
+/* Tailwind 4 bg-opacity compatibility - convert old bg-opacity-* to new syntax */
+.bg-opacity-75 {
+  --tw-bg-opacity: 0.75;
+}
+.bg-opacity-50 {
+  --tw-bg-opacity: 0.5;
+}
+.bg-zinc-500.bg-opacity-75 {
+  background-color: rgb(113 113 122 / 0.75);
+}
+.bg-zinc-600.bg-opacity-75 {
+  background-color: rgb(82 82 91 / 0.75);
+}
+.bg-zinc-600.bg-opacity-50 {
+  background-color: rgb(82 82 91 / 0.5);
+}
+
+/* This file is for your main application CSS */
