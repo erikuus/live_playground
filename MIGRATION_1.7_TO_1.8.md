@@ -114,36 +114,106 @@ Phoenix 1.8 `mix phx.gen.auth` generates components with DaisyUI classes. We:
 
 ### 2. New Layout System
 
-**Phoenix 1.8 feature:** Introduced declarative layouts with `put_layout/2` in LiveView mount.
+**Phoenix 1.8 change:** Layouts shifted from implicit nested templates to explicit function components.
 
-**What it is:**
-Phoenix 1.8 enables dynamic layout switching per LiveView without router configuration:
+**The Change:**
 
+Phoenix 1.7:
 ```elixir
-# Phoenix 1.8 pattern
-def mount(_params, _session, socket) do
-  {:ok, socket |> assign(:page_title, "Home") |> put_layout(html: :app)}
+# router.ex - Layout auto-applied to all routes
+live_session :app,
+  layout: {AppWeb.Layouts, :app},
+  on_mount: [...] do
+  live "/posts", PostLive.Index
+end
+
+# lib/app_web/components/layouts/root.html.heex (static wrapper)
+# lib/app_web/components/layouts/app.html.heex (dynamic wrapper - auto-rendered)
+
+# post_live/index.ex
+def render(assigns) do
+  ~H"""
+  <p>Post content</p>
+  """
 end
 ```
 
-This replaces router-level layout declarations:
-
+Phoenix 1.8:
 ```elixir
-# Phoenix 1.7 pattern (still using)
-live_session :recipes,
-  layout: {LivePlaygroundWeb.Layouts, :recipes},
-  on_mount: [...] do
+# layouts.ex - App layout as function component
+defmodule AppWeb.Layouts do
+  use AppWeb, :html
+
+  slot :breadcrumb, required: false  # Optional slots
+  attr :flash, :map, required: true
+
+  def app(assigns) do
+    ~H"""
+    <main class="px-4 py-20">
+      <div :if={@breadcrumb != []} class="breadcrumbs">
+        <li :for={item <- @breadcrumb}>{render_slot(item)}</li>
+      </div>
+      {render_slot(@inner_block)}  # Your content here
+    </main>
+    """
+  end
+end
+
+# post_live/index.ex - Explicit layout wrapper
+def render(assigns) do
+  ~H"""
+  <Layouts.app flash={@flash}>
+    <:breadcrumb><.link navigate={~p"/posts"}>Posts</.link></:breadcrumb>
+    <p>Post content</p>
+  </Layouts.app>
+  """
+end
+```
+
+**Key differences:**
+
+1. **Explicit vs Implicit:**
+```elixir
+# Phoenix 1.7 - Layout auto-applied
+def render(assigns), do: ~H"<p>Content</p>"
+
+# Phoenix 1.8 - Layout explicitly wrapped
+def render(assigns), do: ~H"<Layouts.app flash={@flash}><p>Content</p></Layouts.app>"
+```
+
+2. **Multiple Layouts:**
+```elixir
+# Phoenix 1.7 - Requires router config + conditional logic
+live_session :app, layout: {Layouts, :app}
+live_session :admin, layout: {Layouts, :admin}
+
+# Phoenix 1.8 - Direct component call
+def render(assigns), do: ~H"<Layouts.admin><p>Admin</p></Layouts.admin>"
+def render(assigns), do: ~H"<Layouts.app><p>App</p></Layouts.app>"
+```
+
+3. **Dynamic Content via Slots:**
+```elixir
+# Phoenix 1.8 - Pass optional content to layout
+<Layouts.app flash={@flash}>
+  <:breadcrumb><.link navigate={~p"/"}>Home</.link></:breadcrumb>
+  <:breadcrumb><.link navigate={~p"/posts"}>Posts</.link></:breadcrumb>
+  <p>Content</p>
+</Layouts.app>
 ```
 
 **Our decision:** Kept Phoenix 1.7's router-based layout system.
 
 **Rationale:**
-- Router layouts work fine for our use case
-- Migration would touch every LiveView file
-- No functional benefit for this app's architecture
-- Can be adopted incrementally if needed
+- Works fine for single-layout-per-section apps
+- Migration requires touching every LiveView file
+- No immediate functional benefit
+- Can adopt incrementally when needed
 
-**Future consideration:** If we need dynamic per-view layout switching (e.g., user preferences, A/B testing), implement the `put_layout/2` pattern.
+**When to migrate:**
+- Need per-view layout switching
+- Want dynamic layouts (user preferences, A/B testing)
+- Adding many specialized layouts (admin, cart, checkout)
 
 ### 3. Binary ID (UUID) Primary Keys
 
@@ -157,6 +227,52 @@ live_session :recipes,
 - No performance issues with current system
 
 **Configuration:** Removed `@primary_key {:id, :binary_id, autogenerate: true}` from generated schemas.
+
+### 4. Timex Dependency
+
+**Phoenix 1.7:** Used Timex library for date/time formatting.
+
+**Our decision:** Removed Timex, replaced with native Elixir functions.
+
+**Rationale:**
+- Elixir 1.14+ has excellent DateTime/Calendar support
+- Reduces dependency count
+- Timex was only used for relative time formatting (`from_now/1`)
+- Simple to replace with `DateTime.diff/3`
+
+**Replacement pattern:**
+
+Phoenix 1.7:
+```elixir
+# mix.exs
+{:timex, "~> 3.0"}
+
+# component
+Timex.from_now(user.inserted_at)  # "2 hours ago"
+```
+
+Phoenix 1.8:
+```elixir
+# No dependency needed
+
+# component
+defp format_user_since(user) do
+  inserted_at = normalize_to_datetime(user.inserted_at)
+  diff = DateTime.diff(DateTime.utc_now(), inserted_at, :second)
+
+  cond do
+    diff < 60 -> "just now"
+    diff < 3600 -> "#{div(diff, 60)} minutes ago"
+    diff < 86400 -> "#{div(diff, 3600)} hours ago"
+    diff < 604800 -> "#{div(diff, 86400)} days ago"
+    true -> Calendar.strftime(inserted_at, "%B %d, %Y")
+  end
+end
+```
+
+**Files affected:**
+- `lib/live_playground_web/components/more_components.ex`
+- All recipe/grid LiveViews using timestamp display
 
 ---
 
@@ -262,8 +378,12 @@ Phoenix 1.8 defaults to UUIDs for new apps, but our database predates this conve
 
 ## Future Migration Opportunities
 
-### Adopt New Layout System
+These features were deferred but can be adopted incrementally:
+
+### 1. Adopt New Layout System
 **Benefit:** Per-view layout switching without router changes.
+
+**Effort:** Medium - update mount/3 in all LiveViews.
 
 **Implementation:**
 ```elixir
@@ -274,19 +394,43 @@ end
 
 Remove `layout:` from router `live_session` blocks.
 
-### Adopt DaisyUI
-**Benefit:** Pre-built component library, faster UI development.
+**When to adopt:** If you need dynamic layout switching based on user preferences or view-specific requirements.
+
+### 2. Adopt DaisyUI
+**Benefit:** Pre-built component library, faster UI development for new features.
 
 **Effort:** High - requires redesigning all existing components.
 
-**Consideration:** Only worthwhile if adding many new components.
+**Consideration:** Only worthwhile if:
+- Adding many new components
+- Want consistent design system
+- Team prefers utility-first + component library approach
 
-### Migrate to UUID Primary Keys
+**Alternative:** Continue with custom Tailwind (current approach works well).
+
+### 3. Migrate to UUID Primary Keys
 **Benefit:** Better distributed system support, no ID enumeration attacks.
 
-**Effort:** Requires database migration, updating all foreign keys.
+**Effort:** High - requires database migration, updating all foreign keys.
 
-**Consideration:** Only needed if scaling to distributed architecture.
+**Consideration:** Only needed if:
+- Scaling to distributed/multi-region architecture
+- Security requires non-sequential IDs
+- Merging databases from multiple sources
+
+**Current approach:** Integer IDs work well for single-database applications.
+
+### 4. Re-adopt Timex
+**Benefit:** More sophisticated date/time formatting and timezone handling.
+
+**Effort:** Low - add dependency, replace custom functions.
+
+**Consideration:** Only needed if:
+- Require complex timezone conversions
+- Need advanced date arithmetic
+- Want internationalized date formatting
+
+**Current approach:** Native DateTime/Calendar sufficient for relative time display.
 
 ---
 
