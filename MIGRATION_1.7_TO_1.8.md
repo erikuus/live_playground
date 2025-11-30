@@ -1,268 +1,305 @@
 # Phoenix 1.7 to 1.8 Migration Guide
 
-This document describes all changes made when migrating `phoenix-playground` (Phoenix 1.7) to `live_playground` (Phoenix 1.8).
+This document describes the migration from `phoenix-playground` (Phoenix 1.7) to `live_playground` (Phoenix 1.8), with focus on what was adopted, what was deferred, and the rationale behind these decisions.
+
+## Migration Philosophy
+
+This migration prioritizes **functional compatibility** over complete adoption of all Phoenix 1.8 features. The goal is a working Phoenix 1.8 app that preserves existing UI/UX while adopting critical auth improvements.
 
 ## Table of Contents
 
-1. [Authentication System](#authentication-system)
-2. [Database Schema Changes](#database-schema-changes)
-3. [Router Configuration](#router-configuration)
-4. [Auth UI Styling](#auth-ui-styling)
-5. [Dependency Issues](#dependency-issues)
-6. [Key Differences Summary](#key-differences-summary)
+1. [What We Adopted](#what-we-adopted)
+2. [What We Deferred](#what-we-deferred)
+3. [Breaking Changes & Configuration](#breaking-changes--configuration)
+4. [Database Schema Fixes](#database-schema-fixes)
+5. [Files Changed](#files-changed)
 
 ---
 
-## Authentication System
+## What We Adopted
 
-### Regenerating Auth
+### 1. Phoenix 1.8 Authentication System
 
-Phoenix 1.8 introduces a new authentication system with significant changes. We regenerated auth using:
-
+Regenerated auth using:
 ```bash
 mix phx.gen.auth Accounts User users
 ```
 
-### New Phoenix 1.8 Auth Patterns Adopted
+**Key adoptions:**
 
-#### 1. Scope Pattern (replaces current_user)
+#### Scope Pattern
+Phoenix 1.8 replaces `@current_user` with `@current_scope.user`. The scope struct enables multi-tenancy and more flexible session management.
+
+```elixir
+# Phoenix 1.7
+socket.assigns.current_user
+
+# Phoenix 1.8
+socket.assigns.current_scope.user
+```
+
+**Router configuration:** Added `{LivePlaygroundWeb.UserAuth, :mount_current_scope}` to all `live_session` blocks.
+
+#### Magic Link Authentication
+Phoenix 1.8 generates passwordless auth by default. Login page now supports:
+- Magic link (email-only, sends login link)
+- Password (traditional email + password)
+
+**New Accounts functions:**
+- `get_user_by_magic_link_token/1`
+- `login_user_by_magic_link/1`
+- `deliver_login_instructions/2`
+
+#### Sudo Mode
+Sensitive operations (email/password changes) require re-authentication:
+
+```elixir
+# In settings.ex
+on_mount {LivePlaygroundWeb.UserAuth, :require_sudo_mode}
+
+# Before sensitive ops
+true = Accounts.sudo_mode?(user)
+```
+
+#### Enhanced Session Tokens
+Session tokens now track authentication time:
+
+```elixir
+field :authenticated_at, :utc_datetime
+```
+
+This enables time-based security policies (force re-auth after X hours).
+
+### 2. Router Configuration
+
+All `live_session` blocks requiring user context updated:
+
+```elixir
+live_session :recipes,
+  layout: {LivePlaygroundWeb.Layouts, :recipes},
+  on_mount: [
+    LivePlaygroundWeb.InitLive,
+    {LivePlaygroundWeb.UserAuth, :mount_current_scope}  # Added
+  ] do
+```
+
+Applied to: `:recipes`, `:grids`, `:comps`, `:default`
+
+---
+
+## What We Deferred
+
+### 1. DaisyUI Removal
+
+**Phoenix 1.8 default:** Ships with DaisyUI as the design system.
+
+**Our decision:** Removed DaisyUI entirely, kept custom Tailwind classes from Phoenix 1.7.
+
+**Rationale:**
+- Existing app has custom-designed components
+- DaisyUI would require redesigning all components
+- No immediate benefit to switching design systems
+
+**How we removed DaisyUI:**
+Phoenix 1.8 `mix phx.gen.auth` generates components with DaisyUI classes. We:
+1. Regenerated auth with `mix phx.gen.auth`
+2. Replaced all auth LiveView templates with Phoenix 1.7 HTML/Tailwind
+3. Preserved all Phoenix 1.8 logic (scope, magic links, sudo mode)
+
+**Files affected:**
+- `lib/live_playground_web/live/user_live/login.ex`
+- `lib/live_playground_web/live/user_live/registration.ex`
+- `lib/live_playground_web/live/user_live/settings.ex`
+- `lib/live_playground_web/live/user_live/confirmation.ex`
+
+### 2. New Layout System
+
+**Phoenix 1.8 feature:** Introduced declarative layouts with `put_layout/2` in LiveView mount.
+
+**What it is:**
+Phoenix 1.8 enables dynamic layout switching per LiveView without router configuration:
+
+```elixir
+# Phoenix 1.8 pattern
+def mount(_params, _session, socket) do
+  {:ok, socket |> assign(:page_title, "Home") |> put_layout(html: :app)}
+end
+```
+
+This replaces router-level layout declarations:
+
+```elixir
+# Phoenix 1.7 pattern (still using)
+live_session :recipes,
+  layout: {LivePlaygroundWeb.Layouts, :recipes},
+  on_mount: [...] do
+```
+
+**Our decision:** Kept Phoenix 1.7's router-based layout system.
+
+**Rationale:**
+- Router layouts work fine for our use case
+- Migration would touch every LiveView file
+- No functional benefit for this app's architecture
+- Can be adopted incrementally if needed
+
+**Future consideration:** If we need dynamic per-view layout switching (e.g., user preferences, A/B testing), implement the `put_layout/2` pattern.
+
+### 3. Binary ID (UUID) Primary Keys
+
+**Phoenix 1.8 default:** Generates schemas with UUID primary keys.
+
+**Our decision:** Kept integer primary keys.
+
+**Rationale:**
+- Existing database uses integer IDs
+- Migration would require database changes
+- No performance issues with current system
+
+**Configuration:** Removed `@primary_key {:id, :binary_id, autogenerate: true}` from generated schemas.
+
+---
+
+## Breaking Changes & Configuration
+
+### 1. Router Hook Change
 
 **Phoenix 1.7:**
 ```elixir
-# Assigns @current_user directly
-socket.assigns.current_user
+on_mount: [LivePlaygroundWeb.InitLive, {LivePlaygroundWeb.UserAuth, :mount_current_user}]
 ```
 
 **Phoenix 1.8:**
 ```elixir
-# Uses @current_scope which wraps the user
-socket.assigns.current_scope.user
-
-# The scope pattern supports multi-tenancy
-defstruct [:user]
+on_mount: [LivePlaygroundWeb.InitLive, {LivePlaygroundWeb.UserAuth, :mount_current_scope}]
 ```
 
-#### 2. Magic Link Authentication (New in 1.8)
+**Why it breaks:** LiveViews expect `@current_scope.user` but without the hook, only `@current_user` would be set (if we kept 1.7 hook).
 
-Phoenix 1.8 generates passwordless login by default. The login page now has two forms:
-- Magic link form (email only, sends login link)
-- Password form (traditional email + password)
+**Fix applied:** Updated all `live_session` blocks in `router.ex`.
 
-**New files:**
-- `lib/live_playground_web/live/user_live/login.ex` - Handles both magic link and password login
-- `lib/live_playground_web/live/user_live/confirmation.ex` - Magic link confirmation page
+### 2. User Access Pattern
 
-**New Accounts functions:**
+**Phoenix 1.7:**
 ```elixir
-Accounts.get_user_by_magic_link_token(token)
-Accounts.login_user_by_magic_link(token)
-Accounts.deliver_login_instructions(user, url_fn)
+@current_user
+current_user = socket.assigns.current_user
 ```
 
-#### 3. Sudo Mode for Sensitive Operations
-
-**Phoenix 1.8 Settings:**
+**Phoenix 1.8:**
 ```elixir
-# lib/live_playground_web/live/user_live/settings.ex
-on_mount {LivePlaygroundWeb.UserAuth, :require_sudo_mode}
-
-# Check sudo mode before sensitive operations
-true = Accounts.sudo_mode?(user)
+@current_scope.user
+current_user = socket.assigns.current_scope.user
 ```
 
-This requires re-authentication before changing email or password.
+**Why it changed:** Scope pattern enables multi-tenancy (e.g., organization scopes, team access).
 
-#### 4. Session Token with Authentication Timestamp
+**Migration note:** All existing code accessing `@current_user` needs updating. This is the most pervasive breaking change.
 
-**Phoenix 1.8 UserToken:**
-```elixir
-# Tracks when user authenticated
-field :authenticated_at, :utc_datetime
+### 3. Auth Directory Renamed
 
-# Session token includes authentication time
-def build_session_token(user) do
-  token = :crypto.strong_rand_bytes(@rand_size)
-  dt = user.authenticated_at || DateTime.utc_now(:second)
-  {token, %UserToken{token: token, context: "session", user_id: user.id, authenticated_at: dt}}
-end
-```
+**Phoenix 1.7:** `lib/live_playground_web/live/auth_live/`
 
----
+**Phoenix 1.8:** `lib/live_playground_web/live/user_live/`
 
-## Database Schema Changes
+**Why:** Phoenix 1.8 `mix phx.gen.auth` generates `user_live/` by default.
 
-### ID Type Mismatch Fix
+### 4. Database Schema Configuration
 
-The Phoenix 1.8 generator defaults to `binary_id` (UUID), but our existing database uses integer IDs.
+**Issue:** Phoenix 1.8 generator adds binary_id config by default.
 
-**Removed from `lib/live_playground/accounts/user.ex`:**
-```elixir
-# These lines were removed to use integer IDs
-@primary_key {:id, :binary_id, autogenerate: true}
-@foreign_key_type :binary_id
-```
-
-**Removed from `lib/live_playground/accounts/user_token.ex`:**
-```elixir
-# Same removal
-@primary_key {:id, :binary_id, autogenerate: true}
-@foreign_key_type :binary_id
-```
-
-**Error this fixed:**
+**Error if not removed:**
 ```
 cannot load `1` as type :binary_id for field :id
 ```
 
----
-
-## Router Configuration
-
-### Adding mount_current_scope Hook
-
-Phoenix 1.8 uses `mount_current_scope` instead of `mount_current_user`. This must be added to all `live_session` blocks that need user context.
-
-**File:** `lib/live_playground_web/router.ex`
-
-**Before (Phoenix 1.7 pattern):**
+**Fix:**
+Remove from `user.ex` and `user_token.ex`:
 ```elixir
-live_session :recipes,
-  layout: {LivePlaygroundWeb.Layouts, :recipes},
-  on_mount: [LivePlaygroundWeb.InitLive] do
-```
-
-**After (Phoenix 1.8 pattern):**
-```elixir
-live_session :recipes,
-  layout: {LivePlaygroundWeb.Layouts, :recipes},
-  on_mount: [LivePlaygroundWeb.InitLive, {LivePlaygroundWeb.UserAuth, :mount_current_scope}] do
-```
-
-**Applied to all live_sessions:**
-- `:recipes`
-- `:steps`
-- `:comps`
-- `:default` (if present)
-
----
-
-## Auth UI Styling
-
-### Preserving 1.7 Visual Design
-
-We kept the Phoenix 1.7 `auth_live/` styling (custom Tailwind design) while adopting 1.8's new auth logic.
-
-### Files Modified
-
-| 1.7 Source | 1.8 Target | Changes |
-|------------|------------|---------|
-| `auth_live/login.ex` | `user_live/login.ex` | Styling only |
-| `auth_live/registration.ex` | `user_live/registration.ex` | Styling only |
-| `auth_live/settings.ex` | `user_live/settings.ex` | Styling only |
-| `auth_live/confirmation.ex` | `user_live/confirmation.ex` | Styling only |
-
-### Styling Pattern Applied
-
-**Outer wrapper (all auth pages):**
-```heex
-<div class="bg-zinc-100 min-h-screen flex flex-col justify-center sm:px-6 lg:px-8">
-  <div class="sm:mx-auto sm:w-full sm:max-w-md">
-    <h2 class="text-center text-2xl font-bold text-zinc-900">
-      Page Title
-    </h2>
-    <p class="mt-2 text-center text-sm text-zinc-600">
-      Subtitle text
-    </p>
-  </div>
-
-  <div class="mt-10 mb-20 sm:mx-auto sm:w-full sm:max-w-[480px]">
-    <div class="bg-white px-6 py-6 shadow-sm sm:rounded-lg sm:px-12">
-      <!-- Form content -->
-    </div>
-  </div>
-</div>
-```
-
-**Settings page (grid layout):**
-```heex
-<div class="bg-zinc-100 min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-  <div class="sm:mx-auto sm:w-full sm:max-w-4xl">
-    <div class="md:grid md:grid-cols-3 md:gap-6">
-      <!-- Sidebar (1 col) -->
-      <div class="mx-6 sm:mx-0 md:col-span-1">
-        <h2>Account Settings</h2>
-        <p>Description</p>
-      </div>
-
-      <!-- Forms (2 cols) -->
-      <div class="mt-5 md:mt-0 md:col-span-2 space-y-6">
-        <div class="bg-white px-6 py-6 shadow-sm sm:rounded-lg">
-          <!-- Email form -->
-        </div>
-        <div class="bg-white px-6 py-6 shadow-sm sm:rounded-lg">
-          <!-- Password form -->
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-```
-
-### Important: Keep Phoenix 1.8 Logic Intact
-
-When applying 1.7 styling, we preserved all 1.8-specific code:
-
-```elixir
-# Keep these Phoenix 1.8 patterns:
-@current_scope              # Not @current_user
-Accounts.sudo_mode?(user)   # Sudo mode checks
-phx-trigger-action          # Form submission pattern
-```
-
-### Slot Limitation with Conditionals
-
-Phoenix LiveView slots cannot be inside EEx conditionals.
-
-**Wrong (causes compilation error):**
-```heex
-<.simple_form for={@form}>
-  <%= if @condition do %>
-    <:actions>
-      <.button>Option A</.button>
-    </:actions>
-  <% else %>
-    <:actions>
-      <.button>Option B</.button>
-    </:actions>
-  <% end %>
-</.simple_form>
-```
-
-**Correct (use separate forms with :if):**
-```heex
-<.simple_form :if={@condition} for={@form}>
-  <:actions>
-    <.button>Option A</.button>
-  </:actions>
-</.simple_form>
-
-<.simple_form :if={!@condition} for={@form}>
-  <:actions>
-    <.button>Option B</.button>
-  </:actions>
-</.simple_form>
+@primary_key {:id, :binary_id, autogenerate: true}
+@foreign_key_type :binary_id
 ```
 
 ---
 
-## Dependency Issues
+## Database Schema Fixes
 
-### Bcrypt Compilation Error
+### Integer ID Compatibility
+
+**Files modified:**
+- `lib/live_playground/accounts/user.ex`
+- `lib/live_playground/accounts/user_token.ex`
+
+**Change:**
+Removed binary_id configuration to use default integer IDs matching existing database.
+
+**Why needed:**
+Phoenix 1.8 defaults to UUIDs for new apps, but our database predates this convention.
+
+---
+
+## Files Changed
+
+### Regenerated (Phoenix 1.8 auth)
+- `lib/live_playground/accounts.ex` - Auth context with new functions
+- `lib/live_playground/accounts/user.ex` - User schema (binary_id removed)
+- `lib/live_playground/accounts/user_token.ex` - Token schema with `authenticated_at`
+- `lib/live_playground/accounts/scope.ex` - New scope struct
+- `lib/live_playground_web/user_auth.ex` - Auth plugs with sudo mode
+- `lib/live_playground_web/controllers/user_session_controller.ex` - Session management
+- `lib/live_playground_web/live/user_live/login.ex` - Magic link + password login
+- `lib/live_playground_web/live/user_live/registration.ex` - User registration
+- `lib/live_playground_web/live/user_live/settings.ex` - Settings with sudo mode
+- `lib/live_playground_web/live/user_live/confirmation.ex` - Magic link confirmation
+
+### Modified (Configuration)
+- `lib/live_playground_web/router.ex` - Added `mount_current_scope` hooks
+
+### Deleted (Phoenix 1.7)
+- `lib/live_playground_web/live/auth_live/*` - Old auth directory
+
+---
+
+## Future Migration Opportunities
+
+### Adopt New Layout System
+**Benefit:** Per-view layout switching without router changes.
+
+**Implementation:**
+```elixir
+def mount(_params, _session, socket) do
+  {:ok, put_layout(socket, html: :app)}
+end
+```
+
+Remove `layout:` from router `live_session` blocks.
+
+### Adopt DaisyUI
+**Benefit:** Pre-built component library, faster UI development.
+
+**Effort:** High - requires redesigning all existing components.
+
+**Consideration:** Only worthwhile if adding many new components.
+
+### Migrate to UUID Primary Keys
+**Benefit:** Better distributed system support, no ID enumeration attacks.
+
+**Effort:** Requires database migration, updating all foreign keys.
+
+**Consideration:** Only needed if scaling to distributed architecture.
+
+---
+
+## Common Migration Errors
+
+### 1. Bcrypt Not Available
 
 **Error:**
 ```
 function Bcrypt.verify_pass/2 is undefined (module Bcrypt is not available)
 ```
+
+**Cause:** Dependency compilation issue after regenerating auth.
 
 **Fix:**
 ```bash
@@ -272,7 +309,7 @@ mix deps.compile bcrypt_elixir
 mix compile --force
 ```
 
-### Port Already in Use
+### 2. Port Already in Use
 
 **Error:**
 ```
@@ -284,68 +321,45 @@ mix compile --force
 lsof -ti:4000 | xargs kill -9
 ```
 
----
+### 3. @current_scope Not Available
 
-## Key Differences Summary
+**Error:** `@current_scope` is `nil` in LiveViews.
 
-| Aspect | Phoenix 1.7 | Phoenix 1.8 |
-|--------|-------------|-------------|
-| User access | `@current_user` | `@current_scope.user` |
-| Router hook | `mount_current_user` | `mount_current_scope` |
-| Login method | Password only | Magic link + Password |
-| Sensitive ops | Direct access | Sudo mode required |
-| Session token | Basic | Includes `authenticated_at` |
-| Auth directory | `auth_live/` | `user_live/` |
-| ID default | Integer | binary_id (UUID) |
+**Cause:** Missing `mount_current_scope` hook in router.
 
-### What We Adopted from 1.8
+**Fix:** Add to `live_session`:
+```elixir
+on_mount: [..., {LivePlaygroundWeb.UserAuth, :mount_current_scope}]
+```
 
-1. **Scope pattern** - For multi-tenancy support
-2. **Magic link auth** - Passwordless login option
-3. **Sudo mode** - Re-auth for sensitive operations
-4. **New token structure** - With authentication timestamp
-5. **Updated Accounts context** - New functions for magic links
+### 4. Binary ID Type Error
 
-### What We Kept from 1.7
+**Error:**
+```
+cannot load `1` as type :binary_id for field :id
+```
 
-1. **Visual styling** - Gray background, white form cards
-2. **Settings grid layout** - Sidebar + form columns
-3. **Button styling** - Full-width buttons with arrows
-4. **Info boxes** - Local mail adapter notice, tips
-5. **Integer IDs** - Existing database compatibility
+**Cause:** Generated schemas have UUID config but database uses integers.
 
----
-
-## Files Changed
-
-### New/Regenerated (Phoenix 1.8)
-- `lib/live_playground/accounts.ex`
-- `lib/live_playground/accounts/user.ex`
-- `lib/live_playground/accounts/user_token.ex`
-- `lib/live_playground/accounts/scope.ex`
-- `lib/live_playground_web/user_auth.ex`
-- `lib/live_playground_web/controllers/user_session_controller.ex`
-- `lib/live_playground_web/live/user_live/login.ex`
-- `lib/live_playground_web/live/user_live/registration.ex`
-- `lib/live_playground_web/live/user_live/settings.ex`
-- `lib/live_playground_web/live/user_live/confirmation.ex`
-
-### Modified (Styling + Hooks)
-- `lib/live_playground_web/router.ex` - Added `mount_current_scope` hooks
-
-### Schema Fixes
-- `lib/live_playground/accounts/user.ex` - Removed binary_id config
-- `lib/live_playground/accounts/user_token.ex` - Removed binary_id config
+**Fix:** Remove from schemas:
+```elixir
+@primary_key {:id, :binary_id, autogenerate: true}
+@foreign_key_type :binary_id
+```
 
 ---
 
 ## Testing Checklist
 
-- [ ] Registration works (creates user, sends magic link)
+After migration, verify:
+
+- [ ] Registration creates user and sends magic link
 - [ ] Magic link login works
-- [ ] Password login works
-- [ ] Settings page accessible (requires sudo mode)
-- [ ] Email change sends confirmation
+- [ ] Password login works (if user has password)
+- [ ] Settings page requires sudo mode
+- [ ] Email change sends confirmation link
 - [ ] Password change works
-- [ ] Logout works
+- [ ] Logout clears session
 - [ ] Protected routes redirect to login
+- [ ] `@current_scope.user` available in all LiveViews
+- [ ] No DaisyUI classes in rendered HTML
