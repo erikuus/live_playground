@@ -1,0 +1,13 @@
+{
+  // Tailwind CSS v4 uses new CSS-first directives (@import ... source(none), @theme, @plugin)
+  // VS Code's built-in CSS validator doesn't understand them yet.
+  // These settings silence only the false warnings while keeping normal validation.
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+
+  // Treat our main stylesheet as Tailwind CSS to avoid parse errors on `source(none)`
+  "files.associations": {
+    "app.css": "tailwindcss"
+  }
+}
